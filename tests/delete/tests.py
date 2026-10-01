@@ -4,6 +4,7 @@ from django.db import IntegrityError, connection, models
 from django.db.models.deletion import Collector
 from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE
 from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
+from django.test.utils import CaptureQueriesContext
 
 from .models import (
     MR, A, Avatar, Base, Child, HiddenUser, HiddenUserProfile, M, M2MFrom,
@@ -182,6 +183,21 @@ class DeletionTests(TestCase):
         # + 1 (delete `s`)
         self.assertNumQueries(5, s.delete)
         self.assertFalse(S.objects.exists())
+
+    def test_only_referenced_fields_selected_for_cascade(self):
+        s = S.objects.create(r=R.objects.create())
+        T.objects.create(s=s, large='large field value')
+
+        with CaptureQueriesContext(connection) as captured_queries:
+            s.delete()
+
+        t_selects = [
+            query['sql'] for query in captured_queries
+            if 'SELECT' in query['sql'] and T._meta.db_table in query['sql']
+        ]
+        self.assertEqual(len(t_selects), 1)
+        self.assertIn(connection.ops.quote_name('id'), t_selects[0])
+        self.assertNotIn(connection.ops.quote_name('large'), t_selects[0])
 
     def test_instance_update(self):
         deleted = []

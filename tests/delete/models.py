@@ -18,6 +18,7 @@ class S(models.Model):
 
 class T(models.Model):
     s = models.ForeignKey(S, models.CASCADE)
+    large = models.TextField(blank=True)
 
 
 class U(models.Model):
