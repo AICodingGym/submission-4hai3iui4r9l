@@ -142,6 +142,14 @@ class OnDeleteTests(TestCase):
 
 
 class DeletionTests(TestCase):
+    def get_selects_for_table(self, captured_queries, table):
+        return [
+            query['sql'] for query in captured_queries
+            if 'SELECT' in query['sql'] and table in query['sql']
+        ]
+
+    def get_select_columns(self, sql):
+        return sql.split(' FROM ', 1)[0]
 
     def test_m2m(self):
         m = M.objects.create()
@@ -200,6 +208,21 @@ class DeletionTests(TestCase):
         self.assertIn(connection.ops.quote_name('id'), t_selects[0])
         self.assertNotIn(connection.ops.quote_name('large'), t_selects[0])
 
+    def test_only_referenced_fields_selected_for_origin(self):
+        parent = VParent.objects.create(large='large field value')
+        V.objects.create(parent=parent)
+
+        with CaptureQueriesContext(connection) as captured_queries:
+            VParent.objects.filter(pk=parent.pk).delete()
+
+        parent_selects = self.get_selects_for_table(
+            captured_queries, VParent._meta.db_table
+        )
+        self.assertEqual(len(parent_selects), 1)
+        select_columns = self.get_select_columns(parent_selects[0])
+        self.assertIn(connection.ops.quote_name('id'), select_columns)
+        self.assertNotIn(connection.ops.quote_name('large'), select_columns)
+
     def test_only_pk_selected_for_terminal_cascade(self):
         parent = VParent.objects.create()
         V.objects.create(parent=parent, large='large field value')
@@ -221,6 +244,26 @@ class DeletionTests(TestCase):
         self.assertEqual(len(v_selects), 1)
         self.assertIn(connection.ops.quote_name('id'), v_selects[0])
         self.assertNotIn(connection.ops.quote_name('large'), v_selects[0])
+
+    def test_delete_signals_disable_only_referenced_fields(self):
+        parent = VParent.objects.create()
+        V.objects.create(parent=parent, large='large field value')
+
+        def pre_delete_handler(**kwargs):
+            pass
+
+        models.signals.pre_delete.connect(pre_delete_handler, sender=V)
+        try:
+            with CaptureQueriesContext(connection) as captured_queries:
+                parent.delete()
+        finally:
+            models.signals.pre_delete.disconnect(pre_delete_handler, sender=V)
+
+        v_selects = self.get_selects_for_table(captured_queries, V._meta.db_table)
+        self.assertEqual(len(v_selects), 1)
+        select_columns = self.get_select_columns(v_selects[0])
+        self.assertIn(connection.ops.quote_name('id'), select_columns)
+        self.assertIn(connection.ops.quote_name('large'), select_columns)
 
     def test_instance_update(self):
         deleted = []

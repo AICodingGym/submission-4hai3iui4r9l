@@ -22,7 +22,7 @@ class T(models.Model):
 
 
 class VParent(models.Model):
-    pass
+    large = models.TextField(blank=True)
 
 
 class V(models.Model):

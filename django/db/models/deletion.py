@@ -84,6 +84,28 @@ class Collector:
             signals.post_delete.has_listeners(model)
         )
 
+    def _get_delete_fields(self, model):
+        """
+        Return the fields that must be loaded on model instances while
+        collecting related objects for deletion.
+        """
+        fields = set(chain.from_iterable(
+            (rf.attname for rf in rel.field.foreign_related_fields)
+            for rel in get_candidate_relations_to_delete(model._meta)
+        ))
+        fields.add(model._meta.pk.attname)
+        return fields
+
+    def _optimize_delete_queryset(self, qs):
+        """
+        Restrict a queryset collected for deletion to the fields required for
+        cascading unless user code could observe the full model instance.
+        """
+        if (qs.query.select_related or self._has_signal_listeners(qs.model) or
+                qs._result_cache is not None):
+            return qs
+        return qs.only(*self._get_delete_fields(qs.model))
+
     def add(self, objs, source=None, nullable=False, reverse_dependency=False):
         """
         Add 'objs' to the collection of objects to be deleted.  If the call is
@@ -194,6 +216,8 @@ class Collector:
         if self.can_fast_delete(objs):
             self.fast_deletes.append(objs)
             return
+        if hasattr(objs, 'model') and hasattr(objs, '_raw_delete'):
+            objs = self._optimize_delete_queryset(objs)
         new_objs = self.add(objs, source, nullable,
                             reverse_dependency=reverse_dependency)
         if not new_objs:
@@ -228,16 +252,7 @@ class Collector:
                         self.fast_deletes.append(sub_objs)
                     else:
                         related_model = related.related_model
-                        if not (sub_objs.query.select_related or
-                                self._has_signal_listeners(related_model)):
-                            referenced_fields = set(chain.from_iterable(
-                                (rf.attname for rf in rel.field.foreign_related_fields)
-                                for rel in get_candidate_relations_to_delete(
-                                    related_model._meta
-                                )
-                            ))
-                            referenced_fields.add(related_model._meta.pk.attname)
-                            sub_objs = sub_objs.only(*referenced_fields)
+                        sub_objs = self._optimize_delete_queryset(sub_objs)
                         if sub_objs:
                             field.remote_field.on_delete(self, field, sub_objs, self.using)
             for field in model._meta.private_fields:

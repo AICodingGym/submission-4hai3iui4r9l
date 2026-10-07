@@ -2,6 +2,7 @@ import datetime
 
 from django.db import connection, models, transaction
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
+from django.test.utils import CaptureQueriesContext
 
 from .models import (
     Award, AwardNote, Book, Child, Contact, Eaten, Email, File, Food, FooFile,
@@ -121,6 +122,29 @@ class DeleteCascadeTransactionTests(TransactionTestCase):
         Eaten.objects.create(food=apple, meal="lunch")
 
         apple.delete()
+        self.assertFalse(Food.objects.exists())
+        self.assertFalse(Eaten.objects.exists())
+
+    def test_to_field_selected_for_delete_origin(self):
+        """
+        Cascade collection fetches non-PK referenced fields but not unrelated
+        fields from the origin queryset.
+        """
+        apple = Food.objects.create(name="apple", large="large field value")
+        Eaten.objects.create(food=apple, meal="lunch")
+
+        with CaptureQueriesContext(connection) as captured_queries:
+            Food.objects.filter(pk=apple.pk).delete()
+
+        food_selects = [
+            query['sql'] for query in captured_queries
+            if 'SELECT' in query['sql'] and Food._meta.db_table in query['sql']
+        ]
+        self.assertEqual(len(food_selects), 1)
+        select_columns = food_selects[0].split(' FROM ', 1)[0]
+        self.assertIn(connection.ops.quote_name('id'), select_columns)
+        self.assertIn(connection.ops.quote_name('name'), select_columns)
+        self.assertNotIn(connection.ops.quote_name('large'), select_columns)
         self.assertFalse(Food.objects.exists())
         self.assertFalse(Eaten.objects.exists())
 

@@ -62,6 +62,7 @@ class Researcher(models.Model):
 
 class Food(models.Model):
     name = models.CharField(max_length=20, unique=True)
+    large = models.TextField(blank=True)
 
 
 class Eaten(models.Model):
