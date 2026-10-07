@@ -21,6 +21,15 @@ class T(models.Model):
     large = models.TextField(blank=True)
 
 
+class VParent(models.Model):
+    pass
+
+
+class V(models.Model):
+    parent = models.ForeignKey(VParent, models.CASCADE)
+    large = models.TextField(blank=True)
+
+
 class U(models.Model):
     t = models.ForeignKey(T, models.CASCADE)
 

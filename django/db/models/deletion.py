@@ -236,6 +236,7 @@ class Collector:
                                     related_model._meta
                                 )
                             ))
+                            referenced_fields.add(related_model._meta.pk.attname)
                             sub_objs = sub_objs.only(*referenced_fields)
                         if sub_objs:
                             field.remote_field.on_delete(self, field, sub_objs, self.using)

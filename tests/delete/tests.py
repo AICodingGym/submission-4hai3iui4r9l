@@ -8,7 +8,8 @@ from django.test.utils import CaptureQueriesContext
 
 from .models import (
     MR, A, Avatar, Base, Child, HiddenUser, HiddenUserProfile, M, M2MFrom,
-    M2MTo, MRNull, Parent, R, RChild, S, T, User, create_a, get_default_r,
+    M2MTo, MRNull, Parent, R, RChild, S, T, U, User, V, VParent, create_a,
+    get_default_r,
 )
 
 
@@ -186,7 +187,7 @@ class DeletionTests(TestCase):
 
     def test_only_referenced_fields_selected_for_cascade(self):
         s = S.objects.create(r=R.objects.create())
-        T.objects.create(s=s, large='large field value')
+        U.objects.create(t=T.objects.create(s=s, large='large field value'))
 
         with CaptureQueriesContext(connection) as captured_queries:
             s.delete()
@@ -198,6 +199,28 @@ class DeletionTests(TestCase):
         self.assertEqual(len(t_selects), 1)
         self.assertIn(connection.ops.quote_name('id'), t_selects[0])
         self.assertNotIn(connection.ops.quote_name('large'), t_selects[0])
+
+    def test_only_pk_selected_for_terminal_cascade(self):
+        parent = VParent.objects.create()
+        V.objects.create(parent=parent, large='large field value')
+
+        def m2m_changed_handler(**kwargs):
+            pass
+
+        models.signals.m2m_changed.connect(m2m_changed_handler, sender=V)
+        try:
+            with CaptureQueriesContext(connection) as captured_queries:
+                parent.delete()
+        finally:
+            models.signals.m2m_changed.disconnect(m2m_changed_handler, sender=V)
+
+        v_selects = [
+            query['sql'] for query in captured_queries
+            if 'SELECT' in query['sql'] and V._meta.db_table in query['sql']
+        ]
+        self.assertEqual(len(v_selects), 1)
+        self.assertIn(connection.ops.quote_name('id'), v_selects[0])
+        self.assertNotIn(connection.ops.quote_name('large'), v_selects[0])
 
     def test_instance_update(self):
         deleted = []
