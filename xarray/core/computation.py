@@ -1808,15 +1808,21 @@ def where(cond, x, y):
     Dataset.where, DataArray.where :
         equivalent methods
     """
+    def _where(x, y, cond):
+        return duck_array_ops.where(cond, x, y)
+
     # alignment for three arguments is complicated, so don't support it yet
+    # Use x, y, cond order to prefer attrs from the data choices over attrs
+    # from the condition.
     return apply_ufunc(
-        duck_array_ops.where,
-        cond,
+        _where,
         x,
         y,
+        cond,
         join="exact",
         dataset_join="exact",
         dask="allowed",
+        keep_attrs=True,
     )
 
 
